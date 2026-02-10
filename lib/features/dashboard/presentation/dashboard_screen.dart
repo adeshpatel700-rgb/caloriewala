@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../core/animations/page_transitions.dart';
 import '../../../core/design/spacing.dart';
 import '../../../core/widgets/app_components.dart';
 import '../../../core/widgets/theme_toggle.dart';
 import '../../app_shell.dart';
 import '../../home/presentation/home_screen.dart';
+import '../../recipes/presentation/recipes_screen.dart';
 import 'providers/dashboard_provider.dart';
 import 'widgets/calorie_progress_ring.dart';
 import 'widgets/macro_breakdown_card.dart';
 import 'widgets/meal_timeline_card.dart';
+import 'widgets/water_tracker_card.dart';
 import 'widgets/weekly_chart_card.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -86,6 +89,38 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
             const SizedBox(height: Spacing.lg),
 
+            // Quick Actions
+            Row(
+              children: [
+                Expanded(
+                  child: _QuickActionCard(
+                    icon: Icons.restaurant_menu,
+                    label: 'My Recipes',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        PageTransitions.slideFromRight(const RecipesScreen()),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: Spacing.sm),
+                Expanded(
+                  child: _QuickActionCard(
+                    icon: Icons.track_changes,
+                    label: 'Set Goals',
+                    onTap: () {
+                      // TODO: Navigate to goals screen
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Goals coming soon!')),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: Spacing.lg),
+
             // Macro Breakdown
             AppSectionHeader(
               title: 'Macronutrients',
@@ -100,6 +135,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               carbsGoal: currentGoal?.carbsGoal ?? 250,
               fatGoal: currentGoal?.fatGoal ?? 65,
             ),
+
+            const SizedBox(height: Spacing.lg),
+
+            // Water Tracker
+            const AppSectionHeader(
+              title: 'Water Tracking',
+              icon: Icons.water_drop,
+            ),
+            const SizedBox(height: Spacing.sm),
+            const WaterTrackerCard(),
 
             const SizedBox(height: Spacing.lg),
 
@@ -165,5 +210,41 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (picked != null) {
       ref.read(selectedDateProvider.notifier).state = picked;
     }
+  }
+}
+
+class _QuickActionCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _QuickActionCard({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 32,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(height: Spacing.xs),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 }

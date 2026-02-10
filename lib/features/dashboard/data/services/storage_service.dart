@@ -1,7 +1,11 @@
+import 'dart:convert';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/meal_log_model.dart';
 import '../models/calorie_goal_model.dart';
 import '../models/activity_log_model.dart';
+import '../models/water_log_model.dart';
+import '../../../recipes/data/models/recipe_model.dart';
 
 class StorageService {
   static const String _mealsBoxName = 'meals';
@@ -151,5 +155,113 @@ class StorageService {
     }
 
     return stats;
+  }
+
+  // Water intake operations
+  static const String _waterLogsKey = 'water_logs';
+
+  Future<void> saveWaterLog(WaterLogModel waterLog) async {
+    final prefs = await SharedPreferences.getInstance();
+    final logs = await getWaterLogs();
+    logs.add(waterLog);
+    final jsonList = logs.map((log) => log.toJson()).toList();
+    await prefs.setString(_waterLogsKey, jsonEncode(jsonList));
+  }
+
+  Future<void> deleteWaterLog(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final logs = await getWaterLogs();
+    logs.removeWhere((log) => log.id == id);
+    final jsonList = logs.map((log) => log.toJson()).toList();
+    await prefs.setString(_waterLogsKey, jsonEncode(jsonList));
+  }
+
+  Future<List<WaterLogModel>> getWaterLogs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString(_waterLogsKey);
+    if (jsonString == null) return [];
+
+    final List<dynamic> jsonList = jsonDecode(jsonString);
+    return jsonList
+        .map((json) => WaterLogModel.fromJson(json as Map<String, dynamic>))
+        .toList()
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+  }
+
+  Future<List<WaterLogModel>> getWaterLogsForDate(DateTime date) async {
+    final startOfDay = DateTime(date.year, date.month, date.day);
+    final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+
+    final allLogs = await getWaterLogs();
+    return allLogs
+        .where((log) =>
+            log.timestamp.isAfter(startOfDay) &&
+            log.timestamp.isBefore(endOfDay))
+        .toList();
+  }
+
+  Future<int> getTotalWaterForDate(DateTime date) async {
+    final logs = await getWaterLogsForDate(date);
+    return logs.fold<int>(0, (sum, log) => sum + log.milliliters);
+  }
+
+  // Recipe operations
+  static const String _recipesKey = 'recipes';
+
+  Future<void> saveRecipe(RecipeModel recipe) async {
+    final prefs = await SharedPreferences.getInstance();
+    final recipes = await getRecipes();
+
+    // Remove existing recipe with same ID if updating
+    recipes.removeWhere((r) => r.id == recipe.id);
+    recipes.add(recipe);
+
+    final jsonList = recipes.map((r) => r.toJson()).toList();
+    await prefs.setString(_recipesKey, jsonEncode(jsonList));
+  }
+
+  Future<void> deleteRecipe(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final recipes = await getRecipes();
+    recipes.removeWhere((r) => r.id == id);
+    final jsonList = recipes.map((r) => r.toJson()).toList();
+    await prefs.setString(_recipesKey, jsonEncode(jsonList));
+  }
+
+  Future<List<RecipeModel>> getRecipes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString(_recipesKey);
+    if (jsonString == null) return [];
+
+    final List<dynamic> jsonList = jsonDecode(jsonString);
+    return jsonList
+        .map((json) => RecipeModel.fromJson(json as Map<String, dynamic>))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<List<RecipeModel>> getFavoriteRecipes() async {
+    final recipes = await getRecipes();
+    return recipes.where((r) => r.isFavorite).toList();
+  }
+
+  Future<RecipeModel?> getRecipeById(String id) async {
+    final recipes = await getRecipes();
+    try {
+      return recipes.firstWhere((r) => r.id == id);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> incrementRecipeUsage(String id) async {
+    final recipe = await getRecipeById(id);
+    if (recipe != null) {
+      final updated = recipe.copyWith(
+        usageCount: recipe.usageCount + 1,
+        lastUsedAt: DateTime.now(),
+      );
+      await saveRecipe(updated);
+    }
   }
 }

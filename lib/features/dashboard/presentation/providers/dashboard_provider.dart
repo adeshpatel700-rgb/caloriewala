@@ -63,3 +63,28 @@ final activityHistoryProvider = Provider<List<ActivityLogModel>>((ref) {
   final storage = ref.watch(storageServiceProvider);
   return storage.getAllActivities();
 });
+
+// Daily water intake provider
+final dailyWaterIntakeProvider = FutureProvider<int>((ref) async {
+  final storage = ref.watch(storageServiceProvider);
+  final selectedDate = ref.watch(selectedDateProvider);
+  return await storage.getTotalWaterForDate(selectedDate);
+});
+
+// Water logs provider
+final waterLogsProvider = FutureProvider((ref) async {
+  final storage = ref.watch(storageServiceProvider);
+  return await storage.getWaterLogs();
+});
+
+// Recipes provider
+final recipesProvider = FutureProvider((ref) async {
+  final storage = ref.watch(storageServiceProvider);
+  return await storage.getRecipes();
+});
+
+// Favorite recipes provider
+final favoriteRecipesProvider = FutureProvider((ref) async {
+  final storage = ref.watch(storageServiceProvider);
+  return await storage.getFavoriteRecipes();
+});

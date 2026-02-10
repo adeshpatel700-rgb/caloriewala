@@ -1,4 +1,4 @@
-# Training Custom Food Recognition Model for CalorieWala
+-.# Training Custom Food Recognition Model for CalorieWala
 
 ## Overview
 This guide helps you train a custom deep learning model specifically for food recognition, optimized for Indian and global cuisines.
