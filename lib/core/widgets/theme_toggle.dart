@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../design/colors.dart';
 import '../theme/theme_provider.dart';
 
 /// Simple theme toggle button

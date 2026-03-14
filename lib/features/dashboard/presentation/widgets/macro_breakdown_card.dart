@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../../core/design/spacing.dart';
+import '../../../../core/design/colors.dart';
+import '../../../../core/design/typography.dart';
 
 class MacroBreakdownCard extends StatelessWidget {
   final double protein;
@@ -24,67 +25,41 @@ class MacroBreakdownCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Theme.of(context).shadowColor.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: AppPalette.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppPalette.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  Icons.pie_chart_outline,
-                  color: Theme.of(context).colorScheme.primary,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Macro Breakdown',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
+              Text('Macros', style: AppText.h3.copyWith(fontSize: 18)),
+              Text('Daily Goals', 
+                  style: AppText.labelSm.copyWith(color: AppPalette.textTert)),
             ],
           ),
           const SizedBox(height: 20),
-          _MacroBar(
+          _MacroPill(
             label: 'Protein',
             value: protein,
             goal: proteinGoal,
-            color: const Color(0xFFEF5350),
-            icon: Icons.egg_outlined,
+            color: AppPalette.protein,
           ),
           const SizedBox(height: 16),
-          _MacroBar(
+          _MacroPill(
             label: 'Carbs',
             value: carbs,
             goal: carbsGoal,
-            color: const Color(0xFF42A5F5),
-            icon: Icons.grain,
+            color: AppPalette.carbs,
           ),
           const SizedBox(height: 16),
-          _MacroBar(
+          _MacroPill(
             label: 'Fat',
             value: fat,
             goal: fatGoal,
-            color: const Color(0xFFFFCA28),
-            icon: Icons.water_drop_outlined,
+            color: AppPalette.fat,
           ),
         ],
       ),
@@ -92,53 +67,47 @@ class MacroBreakdownCard extends StatelessWidget {
   }
 }
 
-class _MacroBar extends StatefulWidget {
+class _MacroPill extends StatefulWidget {
   final String label;
   final double value;
   final double goal;
   final Color color;
-  final IconData icon;
 
-  const _MacroBar({
+  const _MacroPill({
     required this.label,
     required this.value,
     required this.goal,
     required this.color,
-    required this.icon,
   });
 
   @override
-  State<_MacroBar> createState() => _MacroBarState();
+  State<_MacroPill> createState() => _MacroPillState();
 }
 
-class _MacroBarState extends State<_MacroBar>
+class _MacroPillState extends State<_MacroPill>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-    _animation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    );
-    _controller.forward();
+    _ctrl = AnimationController(
+        duration: const Duration(milliseconds: 1200), vsync: this);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutQuart);
+    _ctrl.forward();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final progress = (widget.value / widget.goal).clamp(0.0, 1.0);
+    final goal = widget.goal > 0 ? widget.goal : 1.0;
+    final pct = (widget.value / goal).clamp(0.0, 1.0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,53 +117,38 @@ class _MacroBarState extends State<_MacroBar>
           children: [
             Row(
               children: [
-                Icon(widget.icon, size: 16, color: widget.color),
-                const SizedBox(width: 8),
-                Text(
-                  widget.label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
+                Container(
+                  width: 8, height: 8,
+                  decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
                 ),
+                const SizedBox(width: 8),
+                Text(widget.label,
+                    style: AppText.labelMd.copyWith(
+                        color: AppPalette.textSec, fontWeight: FontWeight.normal)),
               ],
             ),
             Text(
-              '${widget.value.toStringAsFixed(0)}g / ${widget.goal.toStringAsFixed(0)}g',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: widget.color,
-              ),
+              '${widget.value.toStringAsFixed(0)} / ${widget.goal.toStringAsFixed(0)}g',
+              style: AppText.bodySm.copyWith(
+                  color: AppPalette.text, fontWeight: FontWeight.w600),
             ),
           ],
         ),
         const SizedBox(height: 8),
         AnimatedBuilder(
-          animation: _animation,
-          builder: (context, child) {
-            return Stack(
+          animation: _anim,
+          builder: (_, __) => ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Stack(
               children: [
-                Container(
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: widget.color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
+                Container(height: 6, color: AppPalette.surfaceTop),
                 FractionallySizedBox(
-                  widthFactor: progress * _animation.value,
+                  widthFactor: pct * _anim.value,
                   child: Container(
-                    height: 8,
+                    height: 6,
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          widget.color,
-                          widget.color.withOpacity(0.7),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(4),
+                      color: widget.color,
+                      borderRadius: BorderRadius.circular(6),
                       boxShadow: [
                         BoxShadow(
                           color: widget.color.withOpacity(0.3),
@@ -206,8 +160,8 @@ class _MacroBarState extends State<_MacroBar>
                   ),
                 ),
               ],
-            );
-          },
+            ),
+          ),
         ),
       ],
     );

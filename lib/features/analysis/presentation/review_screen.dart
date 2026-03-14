@@ -2,21 +2,24 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/animations/page_transitions.dart';
-import '../../../core/theme/app_colors.dart';
+import '../../../core/design/colors.dart';
+import '../../../core/design/typography.dart';
 import '../../../core/services/local_food_recognizer.dart';
-import '../data/models/food_item_model.dart';
+import '../../../core/widgets/app_components.dart';
 import 'providers/analysis_provider.dart';
 import 'result_screen.dart';
 
-/// Review screen for confirming/editing detected food items
+/// Review screen: confirm/edit detected food before AI analysis
 class ReviewScreen extends ConsumerStatefulWidget {
   final File? imageFile;
   final String? barcodeData;
+  final bool isTextMode;
 
   const ReviewScreen({
     super.key,
     this.imageFile,
     this.barcodeData,
+    this.isTextMode = false,
   });
 
   @override
@@ -24,471 +27,286 @@ class ReviewScreen extends ConsumerStatefulWidget {
 }
 
 class _ReviewScreenState extends ConsumerState<ReviewScreen> {
-  final _textController = TextEditingController();
-  final _portionController = TextEditingController();
-  final _localRecognizer = LocalFoodRecognizer();
-  bool _isTextMode = false;
-  bool _isAnalyzing = false;
-  String? _recognitionMessage;
-  List<RecognizedFoodItem>? _recognizedItems;
+  final _textCtrl    = TextEditingController();
+  final _portionCtrl = TextEditingController();
+  final _recognizer  = LocalFoodRecognizer();
+
+  bool _textMode        = false;
+  bool _scanning        = false;
+  String? _statusMsg;
+  List<RecognizedFoodItem>? _items;
+  String _selectedCategory = 'Lunch';
 
   @override
   void initState() {
     super.initState();
-    _isTextMode = widget.imageFile == null;
-
-    if (widget.barcodeData != null) {
-      // Handle barcode data
-      _handleBarcodeData();
-    } else if (widget.imageFile != null) {
-      // Try local recognition first
-      _performLocalRecognition();
-    }
+    _textMode = widget.isTextMode || widget.imageFile == null;
+    if (widget.barcodeData != null) _handleBarcode();
+    else if (widget.imageFile != null) _scan();
   }
 
-  void _handleBarcodeData() {
+  void _handleBarcode() {
     setState(() {
-      _isTextMode = true;
-      _recognitionMessage = 'Barcode scanned: ${widget.barcodeData}';
-      _textController.text = 'Product barcode: ${widget.barcodeData}';
+      _textMode = true;
+      _statusMsg = 'Barcode: ${widget.barcodeData}';
+      _textCtrl.text = 'Product barcode: ${widget.barcodeData}';
     });
-
-    // Auto-analyze barcode
     Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        ref.read(imageAnalysisProvider.notifier).analyzeText(
-            'Find nutrition info for product with barcode: ${widget.barcodeData}. If you cannot find exact product, provide best estimate for common packaged food item.');
-      }
+      if (!mounted) return;
+      ref.read(imageAnalysisProvider.notifier).analyzeText(
+        'Find nutrition for product barcode ${widget.barcodeData}. '
+        'Give best estimate if exact product unknown.',
+      );
     });
   }
 
-  Future<void> _performLocalRecognition() async {
-    setState(() {
-      _isAnalyzing = true;
-      _recognitionMessage = 'Analyzing image locally...';
-    });
-
+  Future<void> _scan() async {
+    setState(() { _scanning = true; _statusMsg = 'Reading image…'; });
     try {
-      final result = await _localRecognizer.recognizeFood(widget.imageFile!);
-
+      final result = await _recognizer.recognizeFood(widget.imageFile!);
+      if (!mounted) return;
       setState(() {
-        _isAnalyzing = false;
-        _recognitionMessage = result.message;
-        _recognizedItems = result.items;
+        _scanning  = false;
+        _statusMsg = result.message;
+        _items     = result.items;
       });
-
       if (result.success && !result.requiresManualInput) {
-        // High confidence - pre-fill text field with detected items
-        _textController.text =
-            _recognizedItems!.map((item) => item.name).join(', ');
+        _textCtrl.text = _items!.map((i) => i.name).join(', ');
       } else {
-        // Low confidence or no detection - show manual input
-        setState(() {
-          _isTextMode = true;
-        });
+        setState(() => _textMode = true);
       }
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
-        _isAnalyzing = false;
-        _recognitionMessage =
-            'Local recognition failed. Please describe manually.';
-        _isTextMode = true;
+        _scanning  = false;
+        _textMode  = true;
+        _statusMsg = 'Could not read image. Describe the food below.';
       });
     }
   }
 
   @override
   void dispose() {
-    _textController.dispose();
-    _portionController.dispose();
-    _localRecognizer.dispose();
+    _textCtrl.dispose();
+    _portionCtrl.dispose();
+    _recognizer.dispose();
     super.dispose();
+  }
+
+  Future<void> _analyse() async {
+    final text = _textCtrl.text.trim();
+    if (text.isEmpty) return;
+
+    final portionNote = _portionCtrl.text.trim().isNotEmpty
+        ? ' (portion: ${_portionCtrl.text.trim()})'
+        : '';
+    final fullPrompt = '$text$portionNote';
+
+    if (widget.imageFile != null && !_textMode) {
+      await ref.read(imageAnalysisProvider.notifier).analyzeImageWithContext(
+        widget.imageFile!,
+        fullPrompt,
+      );
+    } else {
+      await ref.read(imageAnalysisProvider.notifier).analyzeText(fullPrompt);
+    }
+
+    if (!mounted) return;
+    final state = ref.read(imageAnalysisProvider);
+    if (state.foodItems != null && state.foodItems!.isNotEmpty) {
+      Navigator.push(
+        context,
+        PageTransitions.slideFromRight(ResultScreen(
+          foodItems: state.foodItems!,
+          imageFile: widget.imageFile,
+          mealCategory: _selectedCategory,
+        )),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final analysisState = ref.watch(imageAnalysisProvider);
+    final state = ref.watch(imageAnalysisProvider);
+    final isLoading = state.isLoading || _scanning;
 
     return Scaffold(
+      backgroundColor: AppPalette.bg,
       appBar: AppBar(
-        title: const Text('Review Food Items'),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Image preview (if available)
-            if (widget.imageFile != null)
-              Container(
-                height: 200,
-                width: double.infinity,
-                margin: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  image: DecorationImage(
-                    image: FileImage(widget.imageFile!),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-
-            // Local recognition status
-            if (_recognitionMessage != null && !_isAnalyzing)
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color:
-                      _recognizedItems != null && _recognizedItems!.isNotEmpty
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color:
-                        _recognizedItems != null && _recognizedItems!.isNotEmpty
-                            ? Colors.green
-                            : Colors.orange,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _recognizedItems != null &&
-                                  _recognizedItems!.isNotEmpty
-                              ? Icons.check_circle
-                              : Icons.info_outline,
-                          color: _recognizedItems != null &&
-                                  _recognizedItems!.isNotEmpty
-                              ? Colors.green
-                              : Colors.orange,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _recognitionMessage!,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_recognizedItems != null &&
-                        _recognizedItems!.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Detected items:',
-                        style: TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w500),
-                      ),
-                      ...(_recognizedItems!.map((item) => Padding(
-                            padding: const EdgeInsets.only(left: 28, top: 4),
-                            child: Text(
-                              '• ${item.toDisplayString()}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ))),
-                    ],
-                  ],
-                ),
-              ),
-
-            // Local analysis loading
-            if (_isAnalyzing)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(_recognitionMessage ?? 'Analyzing...'),
-                  ],
-                ),
-              ),
-
-            // Text input mode
-            if (_isTextMode && !_isAnalyzing)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: _textController,
-                      decoration: InputDecoration(
-                        labelText: 'Food Description',
-                        hintText: 'e.g., "roti aur dal"',
-                        prefixIcon: const Icon(Icons.restaurant),
-                        suffixIcon: _textController.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear),
-                                onPressed: () {
-                                  _textController.clear();
-                                  setState(() {});
-                                },
-                              )
-                            : null,
-                      ),
-                      maxLines: 2,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _portionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Portion Size',
-                        hintText: 'e.g., "2 pieces" or "1 bowl"',
-                        prefixIcon: Icon(Icons.dining),
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _textController.text.trim().isEmpty
-                            ? null
-                            : _handleTextSubmit,
-                        icon: const Icon(Icons.arrow_forward),
-                        label: const Text('Analyze'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            // API Loading state (when using text analysis)
-            if (analysisState.isLoading)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: 16),
-                      const Text('Getting nutritional information...'),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Using AI to estimate calories',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // Error state
-            if (analysisState.error != null && !_isAnalyzing)
-              Expanded(
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: AppColors.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          analysisState.error!,
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: () {
-                            if (widget.imageFile != null) {
-                              ref
-                                  .read(imageAnalysisProvider.notifier)
-                                  .analyzeImage(widget.imageFile!);
-                            }
-                          },
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-            // Food items list
-            if (analysisState.foodItems != null &&
-                analysisState.foodItems!.isNotEmpty &&
-                !analysisState.isLoading)
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: analysisState.foodItems!.length,
-                  itemBuilder: (context, index) {
-                    final item = analysisState.foodItems![index];
-                    return _FoodItemCard(
-                      item: item,
-                      onUpdate: (updated) {
-                        ref
-                            .read(imageAnalysisProvider.notifier)
-                            .updateFoodItem(index, updated);
-                      },
-                      onRemove: () {
-                        ref
-                            .read(imageAnalysisProvider.notifier)
-                            .removeFoodItem(index);
-                      },
-                    );
-                  },
-                ),
-              ),
-
-            // Empty state for text mode
-            if (_isTextMode && analysisState.foodItems == null)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.restaurant_menu,
-                        size: 64,
-                        color: AppColors.primary,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Describe your meal above',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // Bottom action buttons
-            if (analysisState.foodItems != null &&
-                analysisState.foodItems!.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Theme.of(context).shadowColor.withOpacity(0.1),
-                      blurRadius: 10,
-                      offset: const Offset(0, -5),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _showAddItemDialog,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Item'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: _handleConfirm,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 56),
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Confirm & Analyze'),
-                    ),
-                  ],
-                ),
-              ),
-          ],
+        title: Text('Review Meal', style: AppText.h2.copyWith(color: AppPalette.text)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppPalette.textSec, size: 22),
+          onPressed: () => Navigator.pop(context),
         ),
+        backgroundColor: AppPalette.bg,
+        elevation: 0,
+        centerTitle: false,
       ),
-    );
-  }
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Image preview ──────────────────────────────
+                  if (widget.imageFile != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Stack(
+                          children: [
+                            Image.file(
+                              widget.imageFile!,
+                              width: double.infinity,
+                              height: 240,
+                              fit: BoxFit.cover,
+                            ),
+                            // Mode toggle
+                            Positioned(
+                              top: 12, right: 12,
+                              child: GestureDetector(
+                                onTap: () => setState(() => _textMode = !_textMode),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppPalette.bg.withOpacity(0.85),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: AppPalette.border),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.3),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _textMode ? Icons.auto_awesome : Icons.edit,
+                                        size: 14,
+                                        color: AppPalette.accent,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _textMode ? 'Use AI Vision' : 'Type Description',
+                                        style: AppText.labelSm.copyWith(
+                                            color: AppPalette.text,
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
 
-  void _handleTextSubmit() {
-    final text = _textController.text.trim();
-    if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please describe your food')),
-      );
-      return;
-    }
+                  // ── Scan status / detected items ─────────────
+                  if (_scanning)
+                    _StatusCard(
+                      icon: Icons.image_search_outlined,
+                      text: _statusMsg ?? 'Analysing image patterns…',
+                      color: AppPalette.accent,
+                    )
+                  else if (_items != null && _items!.isNotEmpty && !_textMode)
+                    _DetectedCard(
+                      items: _items!,
+                      onDismiss: (name) => setState(() =>
+                          _items!.removeWhere((i) => i.name == name)),
+                    )
+                  else if (_statusMsg != null && _textMode)
+                    _StatusCard(
+                      icon: Icons.info_outline,
+                      text: _statusMsg!,
+                      color: AppPalette.warning,
+                    ),
 
-    // Include portion size in description if provided
-    final portion = _portionController.text.trim();
-    final fullDescription = portion.isNotEmpty ? '$text ($portion)' : text;
+                  const SizedBox(height: 24),
 
-    // Analyze text description using Groq text model (free)
-    ref.read(imageAnalysisProvider.notifier).analyzeText(fullDescription);
-  }
+                  // ── Description field ──────────────────────────
+                  Text('What are you eating?',
+                      style: AppText.h4.copyWith(color: AppPalette.textSec)),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _textCtrl,
+                    style: AppText.bodyLg.copyWith(color: AppPalette.text),
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      hintText: _textMode
+                          ? 'e.g. "2 paneer paratha with curd"'
+                          : 'Add items or corrections…',
+                      prefixIcon: const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Icon(Icons.restaurant_menu,
+                            size: 18, color: AppPalette.accent),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
-  void _handleConfirm() {
-    final foodItems = ref.read(imageAnalysisProvider).foodItems;
-    if (foodItems == null || foodItems.isEmpty) return;
+                  // ── Portion field ──────────────────────────────
+                  Text('Portion Size',
+                      style: AppText.h4.copyWith(color: AppPalette.textSec)),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _portionCtrl,
+                    style: AppText.bodyMd.copyWith(color: AppPalette.text),
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. "1 medium bowl", "2 pieces"',
+                      prefixIcon: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Icon(Icons.scale_outlined,
+                            size: 18, color: AppPalette.accent),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
 
-    Navigator.push(
-      context,
-      PageTransitions.slideFromRight(ResultScreen(foodItems: foodItems)),
-    );
-  }
+                  // ── Meal category ──────────────────────────────
+                  Text('Time of Meal',
+                      style: AppText.h4.copyWith(color: AppPalette.textSec)),
+                  const SizedBox(height: 12),
+                  _CategoryRow(
+                    selected: _selectedCategory,
+                    onSelect: (c) => setState(() => _selectedCategory = c),
+                  ),
 
-  void _showAddItemDialog() {
-    final nameController = TextEditingController();
-    final portionController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Food Item'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Food Name',
-                hintText: 'e.g., Roti',
+                  // ── Analysis error ─────────────────────────────
+                  if (state.error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: _StatusCard(
+                        icon: Icons.error_outline,
+                        text: state.error ?? 'Analysis failed. Please try again.',
+                        color: AppPalette.error,
+                      ),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: portionController,
-              decoration: const InputDecoration(
-                labelText: 'Portion',
-                hintText: 'e.g., 2 pieces',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            onPressed: () {
-              if (nameController.text.isNotEmpty &&
-                  portionController.text.isNotEmpty) {
-                final item = FoodItemModel(
-                  name: nameController.text,
-                  portion: portionController.text,
-                  confidence: 'manual',
-                );
-                ref.read(imageAnalysisProvider.notifier).addFoodItem(item);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Add'),
+
+          // ── Pinned CTA ─────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            decoration: BoxDecoration(
+              color: AppPalette.bg,
+              border: Border(top: BorderSide(color: AppPalette.border.withOpacity(0.5))),
+            ),
+            child: AppButton(
+              text: isLoading ? 'Calculating Nutrition…' : 'Analyse & Log',
+              isLoading: isLoading,
+              icon: isLoading ? null : Icons.bolt_rounded,
+              onPressed: isLoading ? null : _analyse,
+            ),
           ),
         ],
       ),
@@ -496,151 +314,118 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   }
 }
 
-class _FoodItemCard extends StatefulWidget {
-  final FoodItemModel item;
-  final Function(FoodItemModel) onUpdate;
-  final VoidCallback onRemove;
+// ── Sub‑widgets ─────────────────────────────────────────────────────────────
 
-  const _FoodItemCard({
-    required this.item,
-    required this.onUpdate,
-    required this.onRemove,
-  });
-
-  @override
-  State<_FoodItemCard> createState() => _FoodItemCardState();
-}
-
-class _FoodItemCardState extends State<_FoodItemCard> {
-  late TextEditingController _portionController;
-  bool _isEditing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _portionController = TextEditingController(text: widget.item.portion);
-  }
-
-  @override
-  void dispose() {
-    _portionController.dispose();
-    super.dispose();
-  }
+class _StatusCard extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color color;
+  const _StatusCard({required this.icon, required this.text, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.item.name,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      if (widget.item.hindiName != null)
-                        Text(
-                          widget.item.hindiName!,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                    ],
-                  ),
-                ),
-                _ConfidenceBadge(confidence: widget.item.confidence),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: widget.onRemove,
-                  color: AppColors.error,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _isEditing
-                      ? TextField(
-                          controller: _portionController,
-                          decoration: const InputDecoration(
-                            labelText: 'Portion',
-                            isDense: true,
-                          ),
-                        )
-                      : Text(
-                          'Portion: ${widget.item.portion}',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                ),
-                TextButton.icon(
-                  onPressed: () {
-                    if (_isEditing) {
-                      widget.onUpdate(
-                        FoodItemModel(
-                          name: widget.item.name,
-                          hindiName: widget.item.hindiName,
-                          portion: _portionController.text,
-                          confidence: widget.item.confidence,
-                        ),
-                      );
-                    }
-                    setState(() {
-                      _isEditing = !_isEditing;
-                    });
-                  },
-                  icon: Icon(_isEditing ? Icons.check : Icons.edit),
-                  label: Text(_isEditing ? 'Save' : 'Edit'),
-                ),
-              ],
-            ),
-          ],
-        ),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.fromBorderSide(BorderSide(color: color.withAlpha(60))),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text,
+                style: AppText.bodyMd.copyWith(color: AppPalette.textSec)),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ConfidenceBadge extends StatelessWidget {
-  final String confidence;
-
-  const _ConfidenceBadge({required this.confidence});
+class _DetectedCard extends StatelessWidget {
+  final List<RecognizedFoodItem> items;
+  final ValueChanged<String> onDismiss;
+  const _DetectedCard({required this.items, required this.onDismiss});
 
   @override
   Widget build(BuildContext context) {
-    Color color;
-    switch (confidence.toLowerCase()) {
-      case 'high':
-        color = AppColors.success;
-        break;
-      case 'low':
-        color = AppColors.warning;
-        break;
-      default:
-        color = AppColors.info;
-    }
-
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color),
+        color: AppPalette.successMuted,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.fromBorderSide(
+            BorderSide(color: AppPalette.success.withAlpha(60))),
       ),
-      child: Text(
-        confidence.toUpperCase(),
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.check_circle_outline,
+                size: 14, color: AppPalette.success),
+            const SizedBox(width: 6),
+            Text('Detected', style: AppText.labelMd.copyWith(color: AppPalette.success)),
+          ]),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: items.map((item) => Chip(
+              label: Text(item.name,
+                  style: AppText.labelMd.copyWith(color: AppPalette.text)),
+              deleteIcon: const Icon(Icons.close, size: 14, color: AppPalette.textSec),
+              onDeleted: () => onDismiss(item.name),
+              backgroundColor: AppPalette.surfaceTop,
+              side: const BorderSide(color: AppPalette.border),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+            )).toList(),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _CategoryRow extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onSelect;
+  const _CategoryRow({required this.selected, required this.onSelect});
+
+  static const _cats = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: _cats.map((c) {
+        final active = c == selected;
+        return Expanded(
+          child: GestureDetector(
+            onTap: () => onSelect(c),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: active ? AppPalette.accent : AppPalette.surfaceTop,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.fromBorderSide(BorderSide(
+                  color: active ? AppPalette.accent : AppPalette.border,
+                )),
+              ),
+              child: Text(c.substring(0, 3),
+                  textAlign: TextAlign.center,
+                  style: AppText.labelMd.copyWith(
+                    color: active ? Colors.black : AppPalette.textSec,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  )),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

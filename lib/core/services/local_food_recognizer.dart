@@ -6,9 +6,12 @@ import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 class LocalFoodRecognizer {
   final ImageLabeler _imageLabeler = ImageLabeler(
     options: ImageLabelerOptions(
-      confidenceThreshold: 0.6, // 60% confidence minimum for better accuracy
+      confidenceThreshold: 0.50, // Keep at 50% — we filter internally more aggressively
     ),
   );
+
+  // Minimum confidence to treat a label as a definitive single food
+  static const double _definitiveThreshold = 0.75;
 
   /// Recognize food items from image locally
   /// Returns list of detected items with confidence scores
@@ -85,25 +88,71 @@ class LocalFoodRecognizer {
   }
 
   /// Extract specific food items from labels
+  /// KEY FIX: Uses single-winner conflict resolution to prevent
+  /// cross-category duplicates (e.g., pizza + bread + cake)
   List<RecognizedFoodItem> _extractSpecificFoods(List<ImageLabel> labels) {
-    final specificFoods = <RecognizedFoodItem>[];
+    final candidates = <RecognizedFoodItem>[];
 
     for (final label in labels) {
       final foodName = _mapToSpecificFood(label.label, labels);
       if (foodName != null && !_isGenericLabel(label.label)) {
-        specificFoods.add(RecognizedFoodItem(
+        candidates.add(RecognizedFoodItem(
           name: foodName,
           confidence: label.confidence,
         ));
       }
     }
 
-    // Remove duplicates and sort by confidence
+    if (candidates.isEmpty) return [];
+
+    // Sort by confidence descending
+    candidates.sort((a, b) => b.confidence.compareTo(a.confidence));
+
+    // ─── Single-winner conflict resolution ───────────────────────────────
+    // If the top item has definitive confidence (>= 75%), return ONLY that item.
+    // This prevents pizza being accompanied by 'Bread' and 'Cake' because
+    // ML Kit also fires baked-goods / pastry labels.
+    if (candidates.first.confidence >= _definitiveThreshold) {
+      return [candidates.first];
+    }
+
+    // Otherwise allow up to 2 items but enforce category exclusivity:
+    // remove any item whose food category overlaps with the winner.
+    final winner = candidates.first;
+    final winnerCategory = _getFoodCategory(winner.name);
+    final filtered = [winner];
+    for (final c in candidates.skip(1)) {
+      if (_getFoodCategory(c.name) != winnerCategory) {
+        filtered.add(c);
+      }
+      if (filtered.length >= 2) break;
+    }
+
+    // Dedup names
     final seen = <String>{};
-    return specificFoods
-        .where((item) => seen.add(item.name.toLowerCase()))
-        .toList()
-      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    return filtered.where((i) => seen.add(i.name.toLowerCase())).toList();
+  }
+
+  /// Classify a food name into a coarse category for conflict resolution
+  String _getFoodCategory(String foodName) {
+    final n = foodName.toLowerCase();
+    if (n.contains('pizza'))                      return 'pizza';
+    if (n.contains('burger') || n.contains('sandwich')) return 'burger';
+    if (n.contains('pasta') || n.contains('noodle'))    return 'pasta';
+    if (n.contains('rice') || n.contains('biryani'))    return 'rice';
+    if (n.contains('cake') || n.contains('dessert') ||
+        n.contains('cookie') || n.contains('brownie') ||
+        n.contains('donut') || n.contains('pastry'))    return 'dessert';
+    if (n.contains('bread') || n.contains('toast') ||
+        n.contains('roti') || n.contains('naan') ||
+        n.contains('paratha') || n.contains('chapati'))  return 'bread';
+    if (n.contains('chicken') || n.contains('meat') ||
+        n.contains('steak') || n.contains('kebab') ||
+        n.contains('tikka'))                            return 'meat';
+    if (n.contains('salad'))                            return 'salad';
+    if (n.contains('soup') || n.contains('curry') ||
+        n.contains('dal'))                              return 'curry';
+    return 'other';
   }
 
   /// Try to infer specific food from generic context
@@ -235,11 +284,10 @@ class LocalFoodRecognizer {
       }
     }
 
-    // Category-based inference (if we see category + specific type)
-    if (lower.contains('bread') || lower.contains('baked')) {
-      return 'Bread';
-    }
-
+    // Category-based inference — NOTE: 'bread' and 'baked' are intentionally
+    // NOT returned as fallbacks here. The old code returned 'Bread' for any
+    // baked-goods label, which caused pizza photos to also show 'Bread'.
+    // If the label wasn't a direct food match, we skip it.
     if (lower.contains('meat') && !_isGenericLabel(label)) {
       return 'Meat';
     }

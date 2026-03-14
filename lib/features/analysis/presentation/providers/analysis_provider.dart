@@ -73,6 +73,35 @@ class ImageAnalysisNotifier extends StateNotifier<ImageAnalysisState> {
     }
   }
 
+  /// Analyze image WITH additional text context (portion size, corrections)
+  Future<void> analyzeImageWithContext(File imageFile, String context) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final foodItems = await _apiService.analyzeImage(imageFile);
+      // If context is non-empty, merge it into the text-based analysis
+      if (context.isNotEmpty && foodItems.isNotEmpty) {
+        // Re-run as text with detected items + context for better accuracy
+        final combined =
+            '${foodItems.map((f) => f.name).join(", ")}. Context: $context';
+        final refined = await _apiService.analyzeTextDescription(combined);
+        state = state.copyWith(isLoading: false, foodItems: refined);
+      } else {
+        state = state.copyWith(isLoading: false, foodItems: foodItems);
+      }
+    } on ValidationException catch (e) {
+      state = state.copyWith(isLoading: false, error: e.message);
+    } on NetworkException catch (e) {
+      state = state.copyWith(isLoading: false, error: e.message);
+    } on ServerException catch (e) {
+      state = state.copyWith(isLoading: false, error: e.message);
+    } catch (e) {
+      state = state.copyWith(
+          isLoading: false,
+          error: 'An unexpected error occurred: ${e.toString()}');
+    }
+  }
+
+
   /// Analyze food from text description
   Future<void> analyzeText(String description) async {
     state = state.copyWith(isLoading: true, error: null);

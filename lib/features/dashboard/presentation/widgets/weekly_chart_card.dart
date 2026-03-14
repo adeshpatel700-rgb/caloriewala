@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/design/spacing.dart';
 import '../providers/dashboard_provider.dart';
+import '../../../../core/design/colors.dart';
+import '../../../../core/design/typography.dart';
 
 class WeeklyChartCard extends ConsumerWidget {
   const WeeklyChartCard({super.key});
@@ -9,46 +10,31 @@ class WeeklyChartCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final weeklyStats = ref.watch(weeklyStatsProvider);
+    final goalInfo = ref.read(currentGoalProvider);
+    final goal = (goalInfo?.dailyCalorieGoal ?? 2000).toDouble();
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Theme.of(context).shadowColor.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: AppPalette.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppPalette.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              Text('Weekly Progress', style: AppText.h3.copyWith(fontSize: 18)),
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color:
-                      Theme.of(context).colorScheme.secondary.withOpacity(0.1),
+                  color: AppPalette.surfaceTop,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(
-                  Icons.bar_chart,
-                  color: Theme.of(context).colorScheme.secondary,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Weekly Overview',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
+                child: Text('Goal: ${goal.toStringAsFixed(0)} kcal',
+                    style: AppText.labelXs.copyWith(color: AppPalette.textTert)),
               ),
             ],
           ),
@@ -57,19 +43,20 @@ class WeeklyChartCard extends ConsumerWidget {
             height: 120,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: weeklyStats.map((stat) {
                 final date = stat['date'] as DateTime;
-                final consumed = stat['consumed'] as double;
-                final goal =
-                    ref.read(currentGoalProvider)?.dailyCalorieGoal ?? 2000;
-                final percentage = (consumed / goal).clamp(0.0, 1.5);
-
-                return _BarItem(
-                  day: _getDayLabel(date),
-                  percentage: percentage,
-                  calories: consumed,
-                  isToday: _isToday(date),
+                final consumed = (stat['consumed'] as num? ?? 0).toDouble();
+                final pct = (consumed / goal).clamp(0.01, 1.2);
+                final isToday = DateUtils.isSameDay(date, DateTime.now());
+                
+                return Expanded(
+                  child: _Bar(
+                    day: _dayLabel(date),
+                    percentage: pct,
+                    calories: consumed,
+                    isToday: isToday,
+                  ),
                 );
               }).toList(),
             ),
@@ -79,26 +66,19 @@ class WeeklyChartCard extends ConsumerWidget {
     );
   }
 
-  String _getDayLabel(DateTime date) {
-    final days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  String _dayLabel(DateTime date) {
+    const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     return days[date.weekday % 7];
-  }
-
-  bool _isToday(DateTime date) {
-    final now = DateTime.now();
-    return date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day;
   }
 }
 
-class _BarItem extends StatefulWidget {
+class _Bar extends StatefulWidget {
   final String day;
   final double percentage;
   final double calories;
   final bool isToday;
 
-  const _BarItem({
+  const _Bar({
     required this.day,
     required this.percentage,
     required this.calories,
@@ -106,31 +86,25 @@ class _BarItem extends StatefulWidget {
   });
 
   @override
-  State<_BarItem> createState() => _BarItemState();
+  State<_Bar> createState() => _BarState();
 }
 
-class _BarItemState extends State<_BarItem>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+class _BarState extends State<_Bar> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-    _animation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    );
-    _controller.forward();
+    _ctrl = AnimationController(
+        duration: const Duration(milliseconds: 1000), vsync: this);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutQuart);
+    _ctrl.forward();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
@@ -139,70 +113,58 @@ class _BarItemState extends State<_BarItem>
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        if (widget.calories > 0)
-          Text(
-            widget.calories.toStringAsFixed(0),
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: widget.isToday
-                  ? Theme.of(context).colorScheme.primary
-                  : Theme.of(context).colorScheme.onSurfaceVariant,
+        if (widget.calories > 0) 
+          AnimatedBuilder(
+            animation: _anim,
+            builder: (_, __) => Opacity(
+              opacity: _anim.value,
+              child: Text(
+                widget.calories > 999 
+                    ? '${(widget.calories/1000).toStringAsFixed(1)}k' 
+                    : widget.calories.toStringAsFixed(0),
+                style: AppText.labelXs.copyWith(
+                  color: widget.isToday ? AppPalette.accent : AppPalette.textTert,
+                  fontSize: 10,
+                ),
+              ),
             ),
           ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         AnimatedBuilder(
-          animation: _animation,
-          builder: (context, child) {
-            return Container(
-              width: 32,
-              height: 100 * widget.percentage * _animation.value,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: widget.isToday
-                      ? [
-                          Theme.of(context).colorScheme.primary,
-                          Theme.of(context).colorScheme.secondary
-                        ]
-                      : [
-                          Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withOpacity(0.3),
-                          Theme.of(context)
-                              .colorScheme
-                              .secondary
-                              .withOpacity(0.3),
-                        ],
-                ),
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: widget.isToday
-                    ? [
-                        BoxShadow(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withOpacity(0.3),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ]
-                    : null,
-              ),
-            );
-          },
+          animation: _anim,
+          builder: (_, __) => Container(
+            width: 32,
+            height: (80 * widget.percentage * _anim.value).clamp(4.0, 80.0),
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(
+              gradient: widget.isToday 
+                  ? const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [AppPalette.accent, Color(0xFFFFAA00)],
+                    )
+                  : null,
+              color: widget.isToday ? null : AppPalette.surfaceTop,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: widget.isToday ? [
+                BoxShadow(
+                  color: AppPalette.accent.withOpacity(0.2),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                )
+              ] : null,
+              border: widget.isToday
+                  ? null
+                  : Border.all(color: AppPalette.border),
+            ),
+          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           widget.day,
-          style: TextStyle(
-            fontSize: 12,
+          style: AppText.labelXs.copyWith(
+            color: widget.isToday ? AppPalette.accent : AppPalette.textTert,
             fontWeight: widget.isToday ? FontWeight.bold : FontWeight.normal,
-            color: widget.isToday
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ],

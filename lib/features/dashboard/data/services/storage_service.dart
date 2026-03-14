@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/meal_log_model.dart';
@@ -30,7 +31,7 @@ class StorageService {
       await Hive.openBox<CalorieGoalModel>(_goalsBoxName);
       await Hive.openBox<ActivityLogModel>(_activitiesBoxName);
     } catch (e) {
-      print('Error initializing storage: $e');
+      debugPrint('Error initializing storage: $e');
     }
   }
 
@@ -52,11 +53,11 @@ class StorageService {
 
   List<MealLogModel> getMealsForDate(DateTime date) {
     final startOfDay = DateTime(date.year, date.month, date.day);
-    final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+    final endOfDay   = DateTime(date.year, date.month, date.day + 1); // midnight of next day
 
     return _mealsBox.values
         .where((meal) =>
-            meal.timestamp.isAfter(startOfDay) &&
+            meal.timestamp.isAfter(startOfDay.subtract(const Duration(seconds: 1))) &&
             meal.timestamp.isBefore(endOfDay))
         .toList()
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
@@ -190,12 +191,12 @@ class StorageService {
 
   Future<List<WaterLogModel>> getWaterLogsForDate(DateTime date) async {
     final startOfDay = DateTime(date.year, date.month, date.day);
-    final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+    final endOfDay   = DateTime(date.year, date.month, date.day + 1); // midnight next day
 
     final allLogs = await getWaterLogs();
     return allLogs
         .where((log) =>
-            log.timestamp.isAfter(startOfDay) &&
+            !log.timestamp.isBefore(startOfDay) &&
             log.timestamp.isBefore(endOfDay))
         .toList();
   }
@@ -263,5 +264,14 @@ class StorageService {
       );
       await saveRecipe(updated);
     }
+  }
+  Future<void> saveUserName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_name', name);
+  }
+
+  Future<String> getUserName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('user_name') ?? '';
   }
 }

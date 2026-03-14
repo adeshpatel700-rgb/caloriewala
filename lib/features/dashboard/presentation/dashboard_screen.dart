@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../core/design/colors.dart';
+import '../../../core/design/typography.dart';
 import '../../../core/animations/page_transitions.dart';
-import '../../../core/design/spacing.dart';
-import '../../../core/widgets/app_components.dart';
-import '../../../core/widgets/theme_toggle.dart';
 import '../../app_shell.dart';
-import '../../home/presentation/home_screen.dart';
-import '../../recipes/presentation/recipes_screen.dart';
+import '../../root_widget.dart';
+import '../../settings/presentation/settings_screen.dart';
 import 'providers/dashboard_provider.dart';
 import 'widgets/calorie_progress_ring.dart';
 import 'widgets/macro_breakdown_card.dart';
@@ -15,235 +14,217 @@ import 'widgets/meal_timeline_card.dart';
 import 'widgets/water_tracker_card.dart';
 import 'widgets/weekly_chart_card.dart';
 
-class DashboardScreen extends ConsumerStatefulWidget {
+class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
   @override
-  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedDate     = ref.watch(selectedDateProvider);
+    final dailyStats       = ref.watch(dailyStatsProvider);
+    final dailyMeals       = ref.watch(dailyMealsProvider);
+    final dailyActivities  = ref.watch(dailyActivitiesProvider);
+    final userName         = ref.watch(userNameProvider);
 
-class _DashboardScreenState extends ConsumerState<DashboardScreen> {
-  @override
-  Widget build(BuildContext context) {
-    final selectedDate = ref.watch(selectedDateProvider);
-    final dailyStats = ref.watch(dailyStatsProvider);
-    final currentGoal = ref.watch(currentGoalProvider);
-    final meals = ref.watch(dailyMealsProvider);
-    final activities = ref.watch(dailyActivitiesProvider);
-
-    final caloriesConsumed = dailyStats['consumed'] as double;
-    final caloriesBurned = dailyStats['burned'] as double;
-    final netCalories = dailyStats['net'] as double;
-    final goalCalories = currentGoal?.dailyCalorieGoal ?? 2000;
-
-    final isToday = DateFormat('yyyy-MM-dd').format(selectedDate) ==
-        DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final now = DateTime.now();
+    final isToday = DateUtils.isSameDay(selectedDate, now);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Dashboard'),
-            Text(
-              isToday
-                  ? 'Today'
-                  : DateFormat('MMM d, yyyy').format(selectedDate),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.calendar_today_outlined),
-            onPressed: () => _selectDate(context),
-          ),
-          const ThemeToggle(),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () {
-              // TODO: Navigate to settings
-            },
-          ),
-        ],
-      ),
+      backgroundColor: AppPalette.bg,
       body: RefreshIndicator(
+        color: AppPalette.accent,
+        backgroundColor: AppPalette.surface,
         onRefresh: () async {
-          // Refresh data
           ref.invalidate(dailyStatsProvider);
           ref.invalidate(dailyMealsProvider);
           ref.invalidate(dailyActivitiesProvider);
+          await Future.delayed(const Duration(milliseconds: 500));
         },
-        child: ListView(
-          padding: const EdgeInsets.all(Spacing.md),
-          children: [
-            // Calorie Progress Ring
-            CalorieProgressRing(
-              consumed: caloriesConsumed,
-              burned: caloriesBurned,
-              netCalories: netCalories,
-              goal: goalCalories,
-            ),
-
-            const SizedBox(height: Spacing.lg),
-
-            // Quick Actions
-            Row(
-              children: [
-                Expanded(
-                  child: _QuickActionCard(
-                    icon: Icons.restaurant_menu,
-                    label: 'My Recipes',
-                    onTap: () {
-                      Navigator.of(context).push(
-                        PageTransitions.slideFromRight(const RecipesScreen()),
-                      );
-                    },
-                  ),
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          slivers: [
+            // ── Header ───────────────────────────────────────────
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 64, 20, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _greeting(userName),
+                            style: AppText.bodyMd.copyWith(
+                                color: AppPalette.textSec, fontWeight: FontWeight.w500),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isToday ? 'Today' : DateFormat('EEEE, MMM d').format(selectedDate),
+                            style: AppText.h1.copyWith(color: AppPalette.text),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _DateNav(
+                      onPrev: () => ref.read(selectedDateProvider.notifier).state =
+                          selectedDate.subtract(const Duration(days: 1)),
+                      onNext: isToday ? null : () =>
+                          ref.read(selectedDateProvider.notifier).state =
+                              selectedDate.add(const Duration(days: 1)),
+                    ),
+                    const SizedBox(width: 8),
+                    _HeaderAction(
+                      icon: Icons.settings_rounded,
+                      onTap: () => Navigator.push(context, 
+                          PageTransitions.slideFromRight(const SettingsScreen())),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: Spacing.sm),
-                Expanded(
-                  child: _QuickActionCard(
-                    icon: Icons.track_changes,
-                    label: 'Set Goals',
-                    onTap: () {
-                      // TODO: Navigate to goals screen
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Goals coming soon!')),
-                      );
-                    },
+              ),
+            ),
+
+            // ── Content Sections ─────────────────────────────────
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  const SizedBox(height: 8),
+                  
+                  // Calorie Ring
+                  CalorieProgressRing(
+                    consumed: (dailyStats['consumed'] as num? ?? 0).toDouble(),
+                    burned:   (dailyStats['burned']   as num? ?? 0).toDouble(),
+                    goal:     (dailyStats['goal']     as num? ?? 2000).toDouble(),
+                    netCalories: (dailyStats['net']   as num? ?? 0).toDouble(),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+
+                  // Macros
+                  MacroBreakdownCard(
+                    protein:      (dailyStats['protein']     as num? ?? 0).toDouble(),
+                    carbs:        (dailyStats['carbs']       as num? ?? 0).toDouble(),
+                    fat:          (dailyStats['fat']         as num? ?? 0).toDouble(),
+                    proteinGoal:  (dailyStats['proteinGoal'] as num? ?? 150).toDouble(),
+                    carbsGoal:    (dailyStats['carbsGoal']   as num? ?? 250).toDouble(),
+                    fatGoal:      (dailyStats['fatGoal']     as num? ?? 65).toDouble(),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Water
+                  const WaterTrackerCard(),
+                  const SizedBox(height: 12),
+
+                  // Weekly Chart
+                  WeeklyChartCard(),
+                  const SizedBox(height: 24),
+
+                  // Timeline Header
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text("Today's Log", style: AppText.h3),
+                        TextButton(
+                          onPressed: () => ref.read(bottomNavIndexProvider.notifier).state = 2,
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppPalette.accent,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          child: const Text('View History'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Meal Timeline
+                  MealTimelineCard(meals: dailyMeals, activities: dailyActivities),
+                  const SizedBox(height: 32),
+                ]),
+              ),
             ),
-
-            const SizedBox(height: Spacing.lg),
-
-            // Macro Breakdown
-            AppSectionHeader(
-              title: 'Macronutrients',
-              icon: Icons.pie_chart_outline,
-            ),
-            const SizedBox(height: Spacing.sm),
-            MacroBreakdownCard(
-              protein: dailyStats['protein'] as double,
-              carbs: dailyStats['carbs'] as double,
-              fat: dailyStats['fat'] as double,
-              proteinGoal: currentGoal?.proteinGoal ?? 150,
-              carbsGoal: currentGoal?.carbsGoal ?? 250,
-              fatGoal: currentGoal?.fatGoal ?? 65,
-            ),
-
-            const SizedBox(height: Spacing.lg),
-
-            // Water Tracker
-            const AppSectionHeader(
-              title: 'Water Tracking',
-              icon: Icons.water_drop,
-            ),
-            const SizedBox(height: Spacing.sm),
-            const WaterTrackerCard(),
-
-            const SizedBox(height: Spacing.lg),
-
-            // Weekly Chart
-            AppSectionHeader(
-              title: 'Weekly Progress',
-              subtitle: 'Last 7 days',
-              icon: Icons.trending_up,
-            ),
-            const SizedBox(height: Spacing.sm),
-            WeeklyChartCard(),
-
-            const SizedBox(height: Spacing.lg),
-
-            // Meal Timeline
-            AppSectionHeader(
-              title: 'Today\'s Activity',
-              subtitle:
-                  '${meals.length} meals • ${activities.length} activities',
-              icon: Icons.timeline,
-            ),
-            const SizedBox(height: Spacing.sm),
-            MealTimelineCard(
-              meals: meals,
-              activities: activities,
-            ),
-
-            const SizedBox(height: 80),
           ],
         ),
       ),
-      floatingActionButton: isToday
-          ? FilledButton.icon(
-              onPressed: () {
-                ref.read(bottomNavIndexProvider.notifier).state = 1;
-              },
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: Spacing.lg,
-                  vertical: Spacing.md,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(Spacing.radiusMd),
-                ),
-              ),
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Log Meal'),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 
-  Future<void> _selectDate(BuildContext context) async {
-    final selectedDate = ref.read(selectedDateProvider);
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: selectedDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now(),
-    );
-
-    if (picked != null) {
-      ref.read(selectedDateProvider.notifier).state = picked;
-    }
+  String _greeting(String name) {
+    final hour = DateTime.now().hour;
+    final prefix = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    return name.isEmpty ? '$prefix 👋' : '$prefix, $name 👋';
   }
 }
 
-class _QuickActionCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _QuickActionCard({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
+class _DateNav extends StatelessWidget {
+  final VoidCallback onPrev;
+  final VoidCallback? onNext;
+  const _DateNav({required this.onPrev, this.onNext});
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      onTap: onTap,
-      child: Column(
+    return Container(
+      decoration: BoxDecoration(
+        color: AppPalette.surfaceTop,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppPalette.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 32,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: Spacing.xs),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-            textAlign: TextAlign.center,
-          ),
+          _NavBtn(icon: Icons.chevron_left_rounded, onTap: onPrev),
+          Container(width: 1, height: 20, color: AppPalette.border),
+          _NavBtn(icon: Icons.chevron_right_rounded, onTap: onNext, enabled: onNext != null),
         ],
+      ),
+    );
+  }
+}
+
+class _NavBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final bool enabled;
+  const _NavBtn({required this.icon, this.onTap, this.enabled = true});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Icon(
+          icon,
+          size: 20,
+          color: enabled ? AppPalette.textSec : AppPalette.textTert,
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderAction extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _HeaderAction({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppPalette.surfaceTop,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppPalette.border),
+        ),
+        child: Icon(icon, size: 20, color: AppPalette.textSec),
       ),
     );
   }

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/animations/staggered_animations.dart';
-import '../../../../core/theme/app_colors.dart';
+import '../../../../core/design/colors.dart';
+import '../../../../core/design/typography.dart';
 import '../../../../core/theme/app_dimensions.dart';
-import '../../../../core/widgets/app_components.dart';
 import '../../data/models/water_log_model.dart';
 import '../providers/dashboard_provider.dart';
+import '../../../../core/widgets/app_components.dart';
 
 class WaterTrackerCard extends ConsumerStatefulWidget {
   const WaterTrackerCard({super.key});
@@ -22,9 +23,7 @@ class _WaterTrackerCardState extends ConsumerState<WaterTrackerCard>
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
+        duration: const Duration(milliseconds: 1200), vsync: this);
     _controller.forward();
   }
 
@@ -36,155 +35,142 @@ class _WaterTrackerCardState extends ConsumerState<WaterTrackerCard>
 
   @override
   Widget build(BuildContext context) {
-    final waterIntakeAsync = ref.watch(dailyWaterIntakeProvider);
+    final waterAsync = ref.watch(dailyWaterIntakeProvider);
 
-    return waterIntakeAsync.when(
-      data: (waterIntake) {
-        final goal = WaterLogModel.dailyGoalMl;
-        final percentage = (waterIntake / goal).clamp(0.0, 1.0);
-
-        return _buildCard(context, waterIntake, goal, percentage);
-      },
-      loading: () => AppCard(
-        child: Column(
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: AppDimensions.sm),
-            Text(
-              'Loading water intake...',
-              style: Theme.of(context).textTheme.bodySmall,
+    return waterAsync.when(
+      data: (ml) => _buildCard(ml),
+      loading: () => Container(
+        height: 80,
+        decoration: BoxDecoration(
+          color: AppPalette.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: const Border.fromBorderSide(BorderSide(color: AppPalette.border)),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 20, height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppPalette.water,
             ),
-          ],
+          ),
         ),
       ),
-      error: (err, stack) => AppCard(
-        child: Text('Error: $err'),
-      ),
+      error: (e, _) => const SizedBox.shrink(),
     );
   }
 
-  Widget _buildCard(
-    BuildContext context,
-    int waterIntake,
-    int goal,
-    double percentage,
-  ) {
-    return AppCard(
+  Widget _buildCard(int ml) {
+    const goal = WaterLogModel.dailyGoalMl;
+    final pct = (ml / goal).clamp(0.0, 1.0);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppPalette.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppPalette.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppPalette.water.withOpacity(0.02),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.water_drop,
-                color: AppColors.info,
-                size: AppDimensions.iconMd,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppPalette.water.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.water_drop_rounded, size: 18, color: AppPalette.water),
               ),
-              const SizedBox(width: AppDimensions.xs),
-              Text(
-                'Water Intake',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Hydration', style: AppText.h3.copyWith(fontSize: 18)),
+                  Text('${(pct * 100).toStringAsFixed(0)}% of daily goal', 
+                      style: AppText.labelXs.copyWith(color: AppPalette.textTert)),
+                ],
               ),
               const Spacer(),
-              Text(
-                '$waterIntake ml',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.info,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
+              Text('$ml / $goal', 
+                  style: AppText.h4.copyWith(color: AppPalette.water, fontSize: 18)),
+              Text(' ml', style: AppText.labelSm.copyWith(color: AppPalette.textTert)),
             ],
           ),
-          const SizedBox(height: AppDimensions.md),
+          const SizedBox(height: 20),
 
           // Progress bar
           AnimatedBuilder(
             animation: _controller,
-            builder: (context, child) {
-              return Column(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                    child: LinearProgressIndicator(
-                      value: percentage * _controller.value,
-                      minHeight: 12,
-                      backgroundColor:
-                          Theme.of(context).colorScheme.surfaceContainerHighest,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        percentage >= 1.0 ? AppColors.success : AppColors.info,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: AppDimensions.xs),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            builder: (_, __) => Column(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(100),
+                  child: Stack(
                     children: [
-                      Text(
-                        '${(percentage * 100).toInt()}% of daily goal',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
+                      Container(height: 10, color: AppPalette.surfaceTop),
+                      FractionallySizedBox(
+                        widthFactor: pct * _controller.value,
+                        child: Container(
+                          height: 10,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [AppPalette.water, Color(0xFF63B3ED)],
                             ),
-                      ),
-                      Text(
-                        'Goal: ${goal}ml',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
+                            borderRadius: BorderRadius.circular(100),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppPalette.water.withOpacity(0.3),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                ],
-              );
-            },
+                ),
+              ],
+            ),
           ),
+          const SizedBox(height: 24),
 
-          const SizedBox(height: AppDimensions.md),
-
-          // Quick add buttons
+          // Quick-add buttons
           Row(
             children: [
-              Expanded(
-                child: _WaterPresetButton(
-                  amount: WaterLogModel.smallGlass,
-                  label: 'Glass\n200ml',
-                  icon: Icons.local_drink,
-                  onTap: () =>
-                      _addWater(WaterLogModel.smallGlass, 'Small Glass'),
-                ),
-              ),
-              const SizedBox(width: AppDimensions.xs),
-              Expanded(
-                child: _WaterPresetButton(
-                  amount: WaterLogModel.mediumGlass,
-                  label: 'Glass\n250ml',
-                  icon: Icons.local_drink,
-                  onTap: () => _addWater(WaterLogModel.mediumGlass, 'Glass'),
-                ),
-              ),
-              const SizedBox(width: AppDimensions.xs),
-              Expanded(
-                child: _WaterPresetButton(
-                  amount: WaterLogModel.bottle,
-                  label: 'Bottle\n500ml',
-                  icon: Icons.water_drop_outlined,
-                  onTap: () => _addWater(WaterLogModel.bottle, 'Bottle'),
-                ),
-              ),
-              const SizedBox(width: AppDimensions.xs),
-              Expanded(
-                child: _WaterPresetButton(
-                  amount: 0,
+              _WaterBtn(
+                  amount: WaterLogModel.smallGlass, 
+                  label: '200ml',
+                  icon: Icons.local_drink_rounded, 
+                  onTap: () => _add(WaterLogModel.smallGlass, 'Glass')),
+              const SizedBox(width: 10),
+              _WaterBtn(
+                  amount: WaterLogModel.mediumGlass, 
+                  label: '250ml',
+                  icon: Icons.local_drink_rounded, 
+                  onTap: () => _add(WaterLogModel.mediumGlass, 'Large Glass')),
+              const SizedBox(width: 10),
+              _WaterBtn(
+                  amount: WaterLogModel.bottle, 
+                  label: '500ml',
+                  icon: Icons.water_rounded, 
+                  onTap: () => _add(WaterLogModel.bottle, 'Bottle')),
+              const SizedBox(width: 10),
+              _WaterBtn(
+                  amount: 0, 
                   label: 'Custom',
-                  icon: Icons.add,
-                  onTap: _showCustomAmountDialog,
-                ),
-              ),
+                  icon: Icons.add_rounded, 
+                  onTap: _showCustom),
             ],
           ),
         ],
@@ -192,83 +178,89 @@ class _WaterTrackerCardState extends ConsumerState<WaterTrackerCard>
     );
   }
 
-  Future<void> _addWater(int milliliters, String note) async {
-    final waterLog = WaterLogModel(
-      timestamp: DateTime.now(),
-      milliliters: milliliters,
-      note: note,
-    );
+  Future<void> _add(int ml, String note) async {
+    final selectedDate = ref.read(selectedDateProvider);
+    final now = DateTime.now();
+    
+    // Create timestamp for the selected date, but with current time if today
+    final timestamp = DateUtils.isSameDay(selectedDate, now)
+        ? now
+        : DateTime(selectedDate.year, selectedDate.month, selectedDate.day, 12, 0);
 
-    await ref.read(storageServiceProvider).saveWaterLog(waterLog);
+    final log = WaterLogModel(
+        timestamp: timestamp, milliliters: ml, note: note);
+    await ref.read(storageServiceProvider).saveWaterLog(log);
     ref.invalidate(dailyWaterIntakeProvider);
-
     if (mounted) {
-      // Animate the progress bar
-      _controller.forward(from: 0.0);
-
-      // Show confirmation
+      _controller.forward(from: 0);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Added ${waterLog.getFormattedAmount()} water'),
-          duration: const Duration(seconds: 1),
+          content: Text('Added ${log.getFormattedAmount()} water \uD83D\uDCA7'),
+          backgroundColor: AppPalette.water,
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(milliseconds: 1500),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
     }
   }
 
-  Future<void> _showCustomAmountDialog() async {
-    final controller = TextEditingController();
+  Future<void> _showCustom() async {
+    final ctrl = TextEditingController();
     final result = await showDialog<int>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Water'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Amount (ml)',
-                hintText: '250',
-                suffixText: 'ml',
-              ),
-              autofocus: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppPalette.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Custom Amount', 
+            style: AppText.h3.copyWith(color: AppPalette.text)),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          style: const TextStyle(color: AppPalette.text),
+          decoration: InputDecoration(
+            labelText: 'Milliliters',
+            labelStyle: const TextStyle(color: AppPalette.textSec),
+            hintText: 'e.g. 330',
+            hintStyle: TextStyle(color: AppPalette.textTert.withOpacity(0.5)),
+            suffixText: 'ml',
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppPalette.border),
             ),
-          ],
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppPalette.accent),
+            ),
+          ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
+              onPressed: () => Navigator.pop(ctx), 
+              child: const Text('Cancel', style: TextStyle(color: AppPalette.textSec))),
+          AppButton(
+            text: 'Add Water',
+            width: 120,
             onPressed: () {
-              final amount = int.tryParse(controller.text);
-              if (amount != null && amount > 0) {
-                Navigator.pop(context, amount);
-              }
+              final v = int.tryParse(ctrl.text);
+              if (v != null && v > 0) Navigator.pop(ctx, v);
             },
-            child: const Text('Add'),
           ),
         ],
       ),
     );
-
-    if (result != null && mounted) {
-      await _addWater(result, 'Custom');
-    }
+    if (result != null && mounted) await _add(result, 'Custom');
   }
 }
 
-class _WaterPresetButton extends StatelessWidget {
+class _WaterBtn extends StatelessWidget {
   final int amount;
   final String label;
   final IconData icon;
   final VoidCallback onTap;
 
-  const _WaterPresetButton({
+  const _WaterBtn({
     required this.amount,
     required this.label,
     required this.icon,
@@ -277,39 +269,26 @@ class _WaterPresetButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ScaleOnTap(
-      child: InkWell(
+    return Expanded(
+      child: GestureDetector(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+        behavior: HitTestBehavior.opaque,
         child: Container(
-          padding: const EdgeInsets.symmetric(
-            vertical: AppDimensions.xs,
-          ),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: AppColors.info.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-            border: Border.all(
-              color: AppColors.info.withOpacity(0.2),
-              width: 1,
-            ),
+            color: AppPalette.surfaceTop,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppPalette.border),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                icon,
-                color: AppColors.info,
-                size: AppDimensions.iconMd,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: AppColors.info,
-                      height: 1.2,
-                    ),
-              ),
+              Icon(icon, size: 20, color: AppPalette.water),
+              const SizedBox(height: 6),
+              Text(label,
+                  style: AppText.labelXs.copyWith(
+                      color: AppPalette.textSec, fontWeight: FontWeight.w600),
+                  textAlign: TextAlign.center),
             ],
           ),
         ),

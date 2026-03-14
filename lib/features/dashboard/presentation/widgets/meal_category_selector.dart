@@ -1,92 +1,79 @@
 import 'package:flutter/material.dart';
-import '../../../../core/design/spacing.dart';
+import '../../../../core/design/colors.dart';
+import '../../../../core/design/typography.dart';
 
 class MealCategorySelector extends StatelessWidget {
   const MealCategorySelector({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Theme.of(context).dividerColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Select Meal Category',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 24),
-          _CategoryOption(
-            icon: Icons.free_breakfast,
-            label: 'Breakfast',
-            color: const Color(0xFFFFB74D),
-            onTap: () => Navigator.pop(context, 'Breakfast'),
-          ),
-          const SizedBox(height: 12),
-          _CategoryOption(
-            icon: Icons.lunch_dining,
-            label: 'Lunch',
-            color: const Color(0xFF4CAF50),
-            onTap: () => Navigator.pop(context, 'Lunch'),
-          ),
-          const SizedBox(height: 12),
-          _CategoryOption(
-            icon: Icons.dinner_dining,
-            label: 'Dinner',
-            color: const Color(0xFF42A5F5),
-            onTap: () => Navigator.pop(context, 'Dinner'),
-          ),
-          const SizedBox(height: 12),
-          _CategoryOption(
-            icon: Icons.cookie,
-            label: 'Snack',
-            color: const Color(0xFFAB47BC),
-            onTap: () => Navigator.pop(context, 'Snack'),
-          ),
-          const SizedBox(height: 12),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
+  static final _categories = [
+    {'label': 'Breakfast', 'icon': Icons.free_breakfast_outlined, 'color': AppPalette.breakfast},
+    {'label': 'Lunch',     'icon': Icons.lunch_dining_outlined,   'color': AppPalette.lunch},
+    {'label': 'Dinner',    'icon': Icons.dinner_dining_outlined,  'color': AppPalette.dinner},
+    {'label': 'Snack',     'icon': Icons.cookie_outlined,         'color': AppPalette.snack},
+  ];
 
   static Future<String?> show(BuildContext context) {
     return showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const MealCategorySelector(),
+      builder: (_) => const MealCategorySelector(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppPalette.surfaceHigh,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(top: BorderSide(color: AppPalette.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(bottom: 20),
+            decoration: BoxDecoration(
+              color: AppPalette.border,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Text('Select Meal Category',
+              style: AppText.h3.copyWith(color: AppPalette.text)),
+          const SizedBox(height: 20),
+          ..._categories.map((cat) => _CategoryRow(
+            icon: cat['icon'] as IconData,
+            label: cat['label'] as String,
+            color: cat['color'] as Color,
+            onTap: () => Navigator.pop(context, cat['label']),
+          )),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Text('Cancel',
+                  style: AppText.bodyMd.copyWith(color: AppPalette.textSec),
+                  textAlign: TextAlign.center),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _CategoryOption extends StatelessWidget {
+class _CategoryRow extends StatefulWidget {
   final IconData icon;
   final String label;
   final Color color;
   final VoidCallback onTap;
 
-  const _CategoryOption({
+  const _CategoryRow({
     required this.icon,
     required this.label,
     required this.color,
@@ -94,38 +81,46 @@ class _CategoryOption extends StatelessWidget {
   });
 
   @override
+  State<_CategoryRow> createState() => _CategoryRowState();
+}
+
+class _CategoryRowState extends State<_CategoryRow> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Material(
-      color: color.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 28),
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) { setState(() => _pressed = false); widget.onTap(); },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 80),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: _pressed ? AppPalette.surfaceTop : AppPalette.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.fromBorderSide(BorderSide(
+            color: _pressed ? widget.color.withAlpha(120) : AppPalette.border,
+          )),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                color: widget.color.withAlpha(20),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: 16),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                ),
-              ),
-              const Spacer(),
-              Icon(Icons.arrow_forward_ios, color: color, size: 20),
-            ],
-          ),
+              child: Icon(widget.icon, size: 18, color: widget.color),
+            ),
+            const SizedBox(width: 14),
+            Text(widget.label,
+                style: AppText.bodyLg.copyWith(
+                    color: AppPalette.text, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            const Icon(Icons.chevron_right, size: 18, color: AppPalette.textTert),
+          ],
         ),
       ),
     );

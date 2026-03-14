@@ -39,6 +39,9 @@ dependencies:
   google_fonts: ^6.1.0
   flutter_svg: ^2.0.9
 
+  # Animations
+  lottie: ^3.1.0
+
   # Utilities
   intl: ^0.19.0
   equatable: ^2.0.5
@@ -68,7 +71,6 @@ flutter:
   assets:
     - .env
     - assets/images/
-    - assets/icons/
 
   # Fonts will be loaded via google_fonts
 

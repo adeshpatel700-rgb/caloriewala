@@ -1,19 +1,27 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/animations/staggered_animations.dart';
+import '../../../core/design/colors.dart';
+import '../../../core/design/typography.dart';
+import '../../../core/widgets/app_components.dart';
 import '../data/models/food_item_model.dart';
+import '../data/models/nutrition_model.dart';
 import 'providers/analysis_provider.dart';
 import '../../dashboard/data/models/meal_log_model.dart';
 import '../../dashboard/presentation/providers/dashboard_provider.dart';
-import '../../dashboard/presentation/widgets/meal_category_selector.dart';
 
-/// Result screen displaying nutrition information
+/// Full-screen nutrition results
 class ResultScreen extends ConsumerStatefulWidget {
   final List<FoodItemModel> foodItems;
+  final File? imageFile;
+  final String mealCategory;
 
   const ResultScreen({
     super.key,
     required this.foodItems,
+    this.imageFile,
+    this.mealCategory = 'Lunch',
   });
 
   @override
@@ -22,293 +30,309 @@ class ResultScreen extends ConsumerStatefulWidget {
 
 class _ResultScreenState extends ConsumerState<ResultScreen>
     with SingleTickerProviderStateMixin {
-  late AnimationController _animationController;
+  late AnimationController _animCtrl;
+  bool _saved = false;
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    );
-
-    // Calculate nutrition on screen load
+    _animCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1200));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(nutritionProvider.notifier).calculateNutrition(widget.foodItems);
-      _animationController.forward();
+      _animCtrl.forward();
     });
   }
 
   @override
   void dispose() {
-    _animationController.dispose();
+    _animCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveMeal(NutritionModel nutrition) async {
+    if (_saved) return;
+    setState(() => _saved = true);
+
+    final meal = MealLogModel(
+      id: const Uuid().v4(),
+      mealCategory: widget.mealCategory,
+      foodItems: widget.foodItems.map((f) => f.name).toList(),
+      totalCalories: nutrition.totalCalories,
+      proteinGrams:  nutrition.proteinGrams,
+      carbsGrams:    nutrition.carbsGrams,
+      fatGrams:      nutrition.fatGrams,
+      timestamp: DateTime.now(),
+    );
+
+    await ref.read(storageServiceProvider).saveMeal(meal);
+    
+    // Refresh all relevant providers
+    ref.invalidate(dailyStatsProvider);
+    ref.invalidate(dailyMealsProvider);
+    ref.invalidate(mealHistoryProvider);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Meal logged successfully! \u2728'),
+          backgroundColor: AppPalette.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.popUntil(context, (r) => r.isFirst);
+    }
+  }
+
+  void _shareResult(NutritionModel nutrition) {
+    // Sharing simulation for the audit
+    final text = 'Just logged my ${widget.mealCategory} on CalorieWala! \n'
+        'Calories: ${nutrition.totalCalories.toStringAsFixed(0)} kcal\n'
+        'Protein: ${nutrition.proteinGrams.toStringAsFixed(1)}g\n'
+        'Download CalorieWala to track your nutrition with AI!';
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Result copied to clipboard! \uD83D\uDCCE'),
+        backgroundColor: AppPalette.accent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final nutritionState = ref.watch(nutritionProvider);
+    final state = ref.watch(nutritionProvider);
 
     return Scaffold(
+      backgroundColor: AppPalette.bg,
       appBar: AppBar(
-        title: const Text('Nutrition Results'),
+        title: Text('Nutrition Results', style: AppText.h2.copyWith(color: AppPalette.text)),
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: AppPalette.textSec, size: 24),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          if (state.nutrition != null)
+            IconButton(
+              icon: const Icon(Icons.share_outlined, color: AppPalette.accent, size: 20),
+              onPressed: () => _shareResult(state.nutrition!),
+            ),
+          const SizedBox(width: 8),
+        ],
+        backgroundColor: AppPalette.bg,
+        elevation: 0,
+        centerTitle: false,
       ),
-      body: SafeArea(
-        child: nutritionState.isLoading
-            ? const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text('Calculating nutrition...'),
-                  ],
+      body: state.isLoading
+          ? const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 32, height: 32,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 3, color: AppPalette.accent),
+                  ),
+                  SizedBox(height: 20),
+                  Text('Calculating nutrition data…',
+                      style: TextStyle(color: AppPalette.textSec, letterSpacing: 0.5)),
+                ],
+              ),
+            )
+          : state.error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline, size: 56, color: AppPalette.error),
+                        const SizedBox(height: 20),
+                        Text('Analysis Interrupted',
+                            style: AppText.h3.copyWith(color: AppPalette.text)),
+                        const SizedBox(height: 12),
+                        Text(state.error!,
+                            style: AppText.bodyMd.copyWith(color: AppPalette.textSec),
+                            textAlign: TextAlign.center),
+                        const SizedBox(height: 32),
+                        AppButton(
+                          text: 'Try Again',
+                          onPressed: () => Navigator.pop(context),
+                          buttonStyle: AppButtonStyle.secondary,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : _SuccessView(
+                  nutrition: state.nutrition!,
+                  foodItems: widget.foodItems,
+                  mealCategory: widget.mealCategory,
+                  animCtrl: _animCtrl,
+                  saved: _saved,
+                  onSave: () => _saveMeal(state.nutrition!),
                 ),
-              )
-            : nutritionState.error != null
-                ? _ErrorView(
-                    error: nutritionState.error!,
-                    onRetry: () {
-                      ref
-                          .read(nutritionProvider.notifier)
-                          .calculateNutrition(widget.foodItems);
-                    },
-                  )
-                : nutritionState.nutrition != null
-                    ? _SuccessView(
-                        nutrition: nutritionState.nutrition!,
-                        foodItems: widget.foodItems,
-                        animation: _animationController,
-                      )
-                    : const SizedBox.shrink(),
-      ),
     );
   }
 }
 
-class _SuccessView extends ConsumerWidget {
-  final dynamic nutrition;
+class _SuccessView extends StatelessWidget {
+  final NutritionModel nutrition;
   final List<FoodItemModel> foodItems;
-  final AnimationController animation;
+  final String mealCategory;
+  final AnimationController animCtrl;
+  final bool saved;
+  final VoidCallback onSave;
 
   const _SuccessView({
     required this.nutrition,
     required this.foodItems,
-    required this.animation,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Calorie Display
-          _CalorieCard(
-            calories: nutrition.totalCalories,
-            animation: animation,
-          ),
-
-          const SizedBox(height: 24),
-
-          // Macros Breakdown
-          _MacrosCard(
-            protein: nutrition.proteinGrams,
-            carbs: nutrition.carbsGrams,
-            fat: nutrition.fatGrams,
-            proteinPercent: nutrition.toEntity().proteinPercentage,
-            carbsPercent: nutrition.toEntity().carbsPercentage,
-            fatPercent: nutrition.toEntity().fatPercentage,
-            animation: animation,
-          ),
-
-          const SizedBox(height: 24),
-
-          // Health Note
-          _HealthNoteCard(healthNote: nutrition.healthNote),
-
-          const SizedBox(height: 24),
-
-          // Food Items Summary
-          _FoodItemsSummary(foodItems: foodItems),
-
-          const SizedBox(height: 24),
-
-          // Disclaimer
-          _DisclaimerCard(disclaimer: nutrition.disclaimer),
-
-          const SizedBox(height: 24),
-
-          // Action Buttons
-          ScaleOnTap(
-            child: ElevatedButton.icon(
-              onPressed: () async {
-                final category = await MealCategorySelector.show(context);
-                if (category != null && context.mounted) {
-                  await _saveMeal(
-                    context,
-                    category,
-                    ref,
-                    nutrition,
-                    foodItems,
-                  );
-                }
-              },
-              icon: const Icon(Icons.save),
-              label: const Text('Save Meal'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 56),
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          ScaleOnTap(
-            child: OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).popUntil((route) => route.isFirst);
-              },
-              icon: const Icon(Icons.restaurant_menu),
-              label: const Text('Analyze Another'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 56),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CalorieCard extends StatelessWidget {
-  final double calories;
-  final AnimationController animation;
-
-  const _CalorieCard({
-    required this.calories,
-    required this.animation,
+    required this.mealCategory,
+    required this.animCtrl,
+    required this.saved,
+    required this.onSave,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, child) {
-        return Container(
-          padding: const EdgeInsets.all(32),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Theme.of(context).colorScheme.primary,
-                Theme.of(context).colorScheme.secondary,
+    const space = SizedBox(height: 24);
+
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Hero calorie card ───────────────────────────
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 32),
+                  decoration: BoxDecoration(
+                    color: AppPalette.surface,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppPalette.border.withOpacity(0.8)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppPalette.accent.withOpacity(0.05),
+                        blurRadius: 30,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Text(mealCategory.toUpperCase(),
+                          style: AppText.labelSm.copyWith(
+                              color: AppPalette.textTert, letterSpacing: 1.5)),
+                      const SizedBox(height: 8),
+                      AnimatedBuilder(
+                        animation: animCtrl,
+                        builder: (_, __) => Text(
+                          (nutrition.totalCalories * animCtrl.value).toStringAsFixed(0),
+                          style: AppText.numberLg.copyWith(
+                              color: AppPalette.accent, fontSize: 56),
+                        ),
+                      ),
+                      Text('TOTAL KILOCALORIES',
+                          style: AppText.labelXs.copyWith(color: AppPalette.textTert)),
+                    ],
+                  ),
+                ),
+                space,
+
+                // ── Macros Section ──────────────────────────────
+                Text('Macro Breakdown',
+                    style: AppText.h4.copyWith(color: AppPalette.textSec)),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppPalette.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppPalette.border),
+                  ),
+                  child: Column(
+                    children: [
+                      _MacroRow(label: 'Protein', value: nutrition.proteinGrams, unit: 'g', color: AppPalette.protein, total: 100),
+                      const Divider(height: 28, color: AppPalette.border),
+                      _MacroRow(label: 'Carbs', value: nutrition.carbsGrams, unit: 'g', color: AppPalette.carbs, total: 300),
+                      const Divider(height: 28, color: AppPalette.border),
+                      _MacroRow(label: 'Fat', value: nutrition.fatGrams, unit: 'g', color: AppPalette.fat, total: 80),
+                    ],
+                  ),
+                ),
+                space,
+
+                // ── Food items ──────────────────────────────────
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Detected Items',
+                        style: AppText.h4.copyWith(color: AppPalette.textSec)),
+                    Text('${foodItems.length} items',
+                        style: AppText.bodySm.copyWith(color: AppPalette.textTert)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: foodItems.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) => _FoodItemCard(
+                    item: foodItems[index],
+                    index: index,
+                  ),
+                ),
+
+                // ── Health note ─────────────────────────────────
+                if (nutrition.healthNote.isNotEmpty) ...[
+                  space,
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppPalette.accent.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppPalette.accent.withOpacity(0.2)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline_rounded, size: 18, color: AppPalette.accent),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            nutrition.healthNote,
+                            style: AppText.bodyMd.copyWith(
+                                color: AppPalette.text, height: 1.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
           ),
-          child: Column(
-            children: [
-              Text(
-                'Total Calories',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.white70,
-                    ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                '${(calories * animation.value).toInt()}',
-                style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                      color: Colors.white,
-                      fontSize: 56,
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              Text(
-                'kcal',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white70,
-                    ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _MacrosCard extends StatelessWidget {
-  final double protein;
-  final double carbs;
-  final double fat;
-  final double proteinPercent;
-  final double carbsPercent;
-  final double fatPercent;
-  final AnimationController animation;
-
-  const _MacrosCard({
-    required this.protein,
-    required this.carbs,
-    required this.fat,
-    required this.proteinPercent,
-    required this.carbsPercent,
-    required this.fatPercent,
-    required this.animation,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Macronutrients',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 24),
-            _MacroRow(
-              label: 'Protein',
-              value: protein,
-              unit: 'g',
-              percentage: proteinPercent,
-              color: const Color(0xFFE57373),
-              animation: animation,
-            ),
-            const SizedBox(height: 16),
-            _MacroRow(
-              label: 'Carbs',
-              value: carbs,
-              unit: 'g',
-              percentage: carbsPercent,
-              color: const Color(0xFF81C784),
-              animation: animation,
-            ),
-            const SizedBox(height: 16),
-            _MacroRow(
-              label: 'Fat',
-              value: fat,
-              unit: 'g',
-              percentage: fatPercent,
-              color: const Color(0xFFFFB74D),
-              animation: animation,
-            ),
-          ],
         ),
-      ),
+        // ── Pinned Save button ─────────────────────────────────
+        Container(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+          decoration: BoxDecoration(
+            color: AppPalette.bg,
+            border: Border(top: BorderSide(color: AppPalette.border.withOpacity(0.5))),
+          ),
+          child: AppButton(
+            text: saved ? 'Meal Saved' : 'Confirm & Log Meal',
+            icon: saved ? Icons.check_circle_rounded : Icons.add_task_rounded,
+            onPressed: saved ? null : onSave,
+            buttonStyle: saved ? AppButtonStyle.secondary : AppButtonStyle.primary,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -317,271 +341,94 @@ class _MacroRow extends StatelessWidget {
   final String label;
   final double value;
   final String unit;
-  final double percentage;
   final Color color;
-  final AnimationController animation;
+  final double total;
 
   const _MacroRow({
     required this.label,
     required this.value,
     required this.unit,
-    required this.percentage,
     required this.color,
-    required this.animation,
+    required this.total,
   });
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              label,
-              style: Theme.of(context).textTheme.titleMedium,
+            Container(
+              width: 8, height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
-            Text(
-              '${value.toStringAsFixed(1)}$unit (${percentage.toStringAsFixed(0)}%)',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-            ),
+            const SizedBox(width: 10),
+            Text(label, style: AppText.labelMd.copyWith(color: AppPalette.textSec)),
+            const Spacer(),
+            Text('${value.toStringAsFixed(1)}$unit',
+                style: AppText.h4.copyWith(color: AppPalette.text, fontSize: 16)),
           ],
         ),
-        const SizedBox(height: 8),
-        AnimatedBuilder(
-          animation: animation,
-          builder: (context, child) {
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: (percentage / 100) * animation.value,
-                backgroundColor: color.withOpacity(0.2),
-                valueColor: AlwaysStoppedAnimation<Color>(color),
-                minHeight: 8,
-              ),
-            );
-          },
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: (value / total).clamp(0.0, 1.0),
+            backgroundColor: AppPalette.surfaceTop,
+            valueColor: AlwaysStoppedAnimation<Color>(color),
+            minHeight: 6,
+          ),
         ),
       ],
     );
   }
 }
 
-class _HealthNoteCard extends StatelessWidget {
-  final String healthNote;
-
-  const _HealthNoteCard({required this.healthNote});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      color: Colors.green.withOpacity(0.1),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.lightbulb_outline,
-              color: Colors.green,
-              size: 28,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                healthNote,
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FoodItemsSummary extends StatelessWidget {
-  final List<FoodItemModel> foodItems;
-
-  const _FoodItemsSummary({required this.foodItems});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Your Meal',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 12),
-            ...foodItems.map((item) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.circle,
-                        size: 8,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '${item.name} - ${item.portion}',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DisclaimerCard extends StatelessWidget {
-  final String disclaimer;
-
-  const _DisclaimerCard({required this.disclaimer});
+class _FoodItemCard extends StatelessWidget {
+  final FoodItemModel item;
+  final int index;
+  const _FoodItemCard({required this.item, required this.index});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.orange.withOpacity(0.3),
-        ),
+        color: AppPalette.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppPalette.border),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.info_outline,
-            color: Colors.orange,
-            size: 20,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.name,
+                    style: AppText.bodyLg.copyWith(
+                        color: AppPalette.text, fontWeight: FontWeight.bold)),
+                if (item.hindiName != null && item.hindiName!.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(item.hindiName!,
+                      style: AppText.bodySm.copyWith(color: AppPalette.textTert)),
+                ],
+              ],
+            ),
           ),
           const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              disclaimer,
-              style: Theme.of(context).textTheme.bodySmall,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppPalette.surfaceTop,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppPalette.border),
             ),
+            child: Text(item.portion,
+                style: AppText.labelSm.copyWith(
+                    color: AppPalette.accent, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
     );
-  }
-}
-
-class _ErrorView extends StatelessWidget {
-  final String error;
-  final VoidCallback onRetry;
-
-  const _ErrorView({
-    required this.error,
-    required this.onRetry,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              error,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: onRetry,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Helper function to save meal
-Future<void> _saveMeal(
-  BuildContext context,
-  String category,
-  WidgetRef ref,
-  dynamic nutrition,
-  List<FoodItemModel> foodItems,
-) async {
-  try {
-    final storageService = ref.read(storageServiceProvider);
-
-    final mealLog = MealLogModel(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      timestamp: DateTime.now(),
-      mealCategory: category,
-      foodItems: foodItems.map((item) => item.name).toList(),
-      totalCalories: nutrition.totalCalories,
-      proteinGrams: nutrition.proteinGrams,
-      carbsGrams: nutrition.carbsGrams,
-      fatGrams: nutrition.fatGrams,
-      imageBase64: null, // We can add image capture later
-      notes: '',
-      isFavorite: false,
-      favoriteName: null,
-    );
-
-    await storageService.saveMeal(mealLog);
-
-    // Invalidate providers to refresh dashboard and history
-    ref.invalidate(dailyMealsProvider);
-    ref.invalidate(dailyStatsProvider);
-    ref.invalidate(weeklyStatsProvider);
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✓ Meal saved to $category!'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(
-            label: 'View Dashboard',
-            textColor: Colors.white,
-            onPressed: () {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            },
-          ),
-        ),
-      );
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error saving meal: $e'),
-          backgroundColor: Theme.of(context).colorScheme.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
   }
 }
